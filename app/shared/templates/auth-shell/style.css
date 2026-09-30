@@ -1,0 +1,145 @@
+.auth-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.auth-art {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: var(--space-10);
+  color: #f6f1ff;
+  background-color: #2a1640;
+  background-image:
+    radial-gradient(circle at 1px 1px, rgb(255 255 255 / 0.13) 1px, transparent 0);
+  background-size: 22px 22px;
+}
+
+.auth-brand {
+  gap: var(--space-2);
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-lg);
+  letter-spacing: -0.01em;
+}
+
+.auth-brand svg {
+  display: block;
+}
+
+.auth-sketch {
+  position: absolute;
+  inset: 12% 6% 22% 6%;
+  width: 88%;
+  height: 66%;
+}
+
+.auth-note {
+  position: absolute;
+  width: 9.5rem;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  line-height: 1.35;
+  color: #231a10;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 10px 24px rgb(0 0 0 / 0.28);
+}
+
+.auth-note.is-a {
+  top: 18%;
+  left: 12%;
+  background: #ffe28a;
+  transform: rotate(-4deg);
+}
+
+.auth-note.is-b {
+  top: 30%;
+  right: 12%;
+  background: #ffc4d8;
+  transform: rotate(3deg);
+}
+
+.auth-cursor {
+  position: absolute;
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+}
+
+.auth-cursor span {
+  margin-top: 14px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: #fff;
+}
+
+.auth-cursor.is-a {
+  top: 62%;
+  left: 30%;
+}
+
+.auth-cursor.is-b {
+  top: 24%;
+  left: 58%;
+}
+
+.auth-tagline {
+  position: relative;
+  max-width: 26rem;
+}
+
+.auth-tagline h2 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-3xl);
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  color: #fff;
+}
+
+.auth-tagline p {
+  margin: 0;
+  color: rgb(246 241 255 / 0.78);
+}
+
+.auth-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-10) var(--space-6);
+}
+
+.auth-panel > main {
+  width: 100%;
+  max-width: 24rem;
+}
+
+@media (max-width: 52rem) {
+  .auth-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-art {
+    min-height: 13rem;
+    padding: var(--space-6);
+  }
+
+  .auth-sketch,
+  .auth-note,
+  .auth-cursor {
+    display: none;
+  }
+
+  .auth-tagline h2 {
+    font-size: var(--text-2xl);
+  }
+
+  .auth-panel {
+    align-items: flex-start;
+    padding: var(--space-8) var(--space-5);
+  }
+}

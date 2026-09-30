@@ -1,0 +1,109 @@
+import "./style.css";
+import { redirect } from "@elements/app";
+import favicon from "#app/shared/assets/favicons/favicon.svg";
+import { AuthShell } from "#app/shared/templates/auth-shell";
+import { signin } from "#app/shared/services/auth";
+
+interface SigninForm {
+  email: string;
+  password: string;
+  error: string;
+}
+
+interface DemoLogin {
+  id: string;
+  name: string;
+  email: string;
+  color: string;
+}
+
+/** The accounts the demo seed creates. They share one password. */
+export const DEMO_PASSWORD = "sketchmoor";
+
+export const DEMO_LOGINS: DemoLogin[] = [
+  { id: "ada", name: "Ada Lovelace", email: "ada@sketchmoor.dev", color: "#e5484d" },
+  { id: "grace", name: "Grace Hopper", email: "grace@sketchmoor.dev", color: "#0090ff" },
+  { id: "alan", name: "Alan Turing", email: "alan@sketchmoor.dev", color: "#30a46c" },
+];
+
+function onSubmit(form: SigninForm, next: string) {
+  try {
+    signin(form.email, form.password);
+    form.error = "";
+    redirect(next);
+  } catch (err: any) {
+    form.error = err.message;
+  }
+}
+
+function onUseLogin(form: SigninForm, login: DemoLogin, next: string) {
+  form.email = login.email;
+  form.password = DEMO_PASSWORD;
+  onSubmit(form, next);
+}
+
+<html lang="en" class="page-signin" (
+  next: string,
+  private form: SigninForm = { email: "", password: "", error: "" },
+)>
+  <head>
+    <title>Sign in · sketchmoor</title>
+    <meta name="description" content="Sign in to sketchmoor, a shared whiteboard.">
+    <link rel="icon" type="image/svg+xml" href={favicon} />
+  </head>
+  <body>
+    <AuthShell>
+      <main>
+        <form class="stack" onsubmit={() => onSubmit(form, next)}>
+          <h1>Sign in</h1>
+
+          <p e:if={form.error} class="callout is-danger" role="alert">{form.error}</p>
+
+          <div class="field">
+            <label for="email">Email</label>
+            <input id="email"
+                   name="email"
+                   type="email"
+                   value={form.email}
+                   autocomplete="email"
+                   autocapitalize="none"
+                   spellcheck={false}
+                   placeholder="ada@sketchmoor.dev"
+                   required>
+          </div>
+
+          <div class="field">
+            <label for="password">Password</label>
+            <input id="password"
+                   name="password"
+                   type="password"
+                   value={form.password}
+                   autocomplete="current-password"
+                   required>
+          </div>
+
+          <button type="submit" class="is-primary is-block">Sign in</button>
+
+          <p class="text-sm">New here? <a href={next === "/" ? "/signup" : `/signup?next=${encodeURIComponent(next)}`}>Create an account</a></p>
+        </form>
+
+        <section class="signin-demo stack is-sm">
+          <h2>Demo accounts · password <code>{DEMO_PASSWORD}</code></h2>
+
+          <ul class="signin-logins stack is-xs">
+            <li e:for={login of DEMO_LOGINS}>
+              <button type="button" class="signin-login" onclick={() => onUseLogin(form, login, next)}>
+                <span class="signin-avatar" style={{ background: login.color }}>{login.name[0]}</span>
+                <span class="signin-who">
+                  {login.name}
+                  <small>{login.email}</small>
+                </span>
+                <span class="signin-use">Sign in →</span>
+              </button>
+            </li>
+          </ul>
+        </section>
+      </main>
+    </AuthShell>
+  </body>
+</html>

@@ -1,0 +1,61 @@
+@import "#app/shared/styles/page.css";
+
+.signin-demo {
+  margin-top: var(--space-8);
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--rule);
+}
+
+.signin-demo h2 {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-soft);
+}
+
+.signin-logins {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.signin-login {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  font-weight: normal;
+}
+
+.signin-avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: #fff;
+}
+
+.signin-who {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.signin-who small {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-soft);
+}
+
+.signin-use {
+  font-size: var(--text-xs);
+  color: var(--ink-soft);
+}

@@ -1,0 +1,1274 @@
+import "./style.css";
+import type { Listener, LiveView } from "@elements/app";
+import favicon from "#app/shared/assets/favicons/favicon.svg";
+import { BoardEvent, emit, Member, renameBoard, Shape, ShapeKind } from "#app/shared/services/boards";
+import { bounds, fontSize, notePaper, packStroke, simplify } from "#app/shared/services/geometry";
+import {
+  arrowPath,
+  BoardUi,
+  Change,
+  COLORS,
+  fitCamera,
+  firstName,
+  Handle,
+  initials,
+  inkPoints,
+  MAX_ZOOM,
+  MIN_ZOOM,
+  NOTE_SIZE,
+  newId,
+  penPoints,
+  resize,
+  Tool,
+  TOOLS,
+  visibleShapes,
+  WIDTHS,
+  zoomAt,
+} from "./canvas";
+
+interface Env {
+  boardId: string;
+  clientId: string;
+  me: Member;
+}
+
+type Gesture =
+  | { mode: "pan"; sx: number; sy: number; camX: number; camY: number }
+  | { mode: "pen"; id: string; sent: number }
+  | { mode: "create"; id: string; kind: ShapeKind; ox: number; oy: number }
+  | { mode: "move"; id: string; orig: Shape; ox: number; oy: number; moved: boolean }
+  | { mode: "resize"; id: string; orig: Shape; handle: Handle; ox: number; oy: number }
+  | { mode: "erase"; changes: Change[] }
+  | { mode: "pinch"; dist: number; mx: number; my: number; camX: number; camY: number; zoom: number };
+
+// Browser-only handles the handlers share. None of it is rendered, so none
+// of it needs to be reactive.
+let surfaceEl: HTMLElement | null = null;
+let editorEl: HTMLTextAreaElement | null = null;
+let gesture: Gesture | null = null;
+let spaceDown = false;
+let pointers = new Map<number, { sx: number; sy: number }>();
+let outbox = new Map<string, BoardEvent>();
+let outboxTimer: ReturnType<typeof setTimeout> | null = null;
+
+const SEND_EVERY_MS = 40;
+
+function screenPoint(e: MouseEvent) {
+  let r = surfaceEl ? surfaceEl.getBoundingClientRect() : { left: 0, top: 0 };
+
+  return { sx: e.clientX - r.left, sy: e.clientY - r.top };
+}
+
+function toBoard(e: MouseEvent, ui: BoardUi) {
+  let { sx, sy } = screenPoint(e);
+
+  return { x: sx / ui.camera.zoom + ui.camera.x, y: sy / ui.camera.zoom + ui.camera.y };
+}
+
+function send(key: string, event: BoardEvent) {
+  let prev = outbox.get(key);
+
+  // Pen points accumulate between sends rather than replacing each other.
+  if (prev && prev.kind === "ink" && event.kind === "ink") {
+    prev.points.push(...event.points);
+  } else {
+    outbox.set(key, event);
+  }
+
+  if (!outboxTimer) {
+    outboxTimer = setTimeout(() => flushOutbox(), SEND_EVERY_MS);
+  }
+}
+
+function flushOutbox() {
+  if (outboxTimer) {
+    clearTimeout(outboxTimer);
+    outboxTimer = null;
+  }
+
+  if (outbox.size === 0) {
+    return;
+  }
+
+  let events = [...outbox.values()];
+  outbox.clear();
+
+  try {
+    emit(events);
+  } catch (err) {
+    console.warn("sketchmoor: live update not sent", err);
+  }
+}
+
+/** Tells everyone a gesture is finished, after the write it produced. */
+function settle(env: Env, id: string) {
+  flushOutbox();
+  emit([{ kind: "settle", boardId: env.boardId, clientId: env.clientId, id }]);
+}
+
+function setGhost(ui: BoardUi, env: Env, id: string, patch: Partial<Shape>) {
+  let ghost = ui.ghosts.find((g) => g.id === id && g.clientId === env.clientId);
+
+  if (ghost) {
+    ghost.shape = { ...ghost.shape, ...patch };
+    ghost.at = Date.now();
+  } else {
+    ghost = { id, clientId: env.clientId, shape: patch, at: Date.now() };
+    ui.ghosts.push(ghost);
+  }
+
+  send(`ghost:${id}`, { kind: "ghost", boardId: env.boardId, clientId: env.clientId, id, shape: ghost.shape });
+}
+
+function dropGhost(ui: BoardUi, id: string, clientId: string) {
+  let i = ui.ghosts.findIndex((g) => g.id === id && g.clientId === clientId);
+
+  if (i >= 0) {
+    ui.ghosts.splice(i, 1);
+  }
+}
+
+function dropInk(ui: BoardUi, id: string) {
+  let i = ui.inks.findIndex((k) => k.id === id);
+
+  if (i >= 0) {
+    ui.inks.splice(i, 1);
+  }
+}
+
+function patchShape(shapes: LiveView<Shape>, id: string, patch: Partial<Shape>, resetUI?: () => void) {
+  let row = shapes.get(id);
+
+  if (!row) {
+    resetUI?.();
+    return;
+  }
+
+  shapes.update({ ...row, ...patch }, resetUI);
+}
+
+function pushStep(ui: BoardUi, changes: Change[]) {
+  if (changes.length === 0) {
+    return;
+  }
+
+  ui.undo.push({ id: newId(), changes });
+  ui.redo.splice(0, ui.redo.length);
+
+  if (ui.undo.length > 200) {
+    ui.undo.shift();
+  }
+}
+
+function onUndo(shapes: LiveView<Shape>, ui: BoardUi) {
+  let step = ui.undo.pop();
+
+  if (!step) {
+    return;
+  }
+
+  ui.selected = "";
+  ui.redo.push(step);
+
+  for (let c of [...step.changes].reverse()) {
+    patchShape(shapes, c.id, c.before);
+  }
+}
+
+function onRedo(shapes: LiveView<Shape>, ui: BoardUi) {
+  let step = ui.redo.pop();
+
+  if (!step) {
+    return;
+  }
+
+  ui.selected = "";
+  ui.undo.push(step);
+
+  for (let c of step.changes) {
+    patchShape(shapes, c.id, c.after);
+  }
+}
+
+function newShape(ui: BoardUi, env: Env, kind: ShapeKind, box: { x: number; y: number; w: number; h: number }): Shape {
+  return {
+    id: newId(),
+    createdAt: new Date(),
+    boardId: env.boardId,
+    createdBy: env.me.id,
+    kind,
+    ...box,
+    z: Date.now(),
+    color: ui.color,
+    strokeWidth: ui.strokeWidth,
+    points: "",
+    text: "",
+    deleted: false,
+  };
+}
+
+/** Black ink makes grey paper, so a note picked in black is the classic yellow. */
+function noteColor(color: string): string {
+  return color === COLORS[0] ? "#ffc53d" : color;
+}
+
+function insertShape(shapes: LiveView<Shape>, ui: BoardUi, shape: Shape, resetUI?: () => void) {
+  shapes.insert(shape, resetUI);
+  pushStep(ui, [{ id: shape.id, before: { deleted: true }, after: { deleted: false } }]);
+}
+
+function beginEdit(ui: BoardUi, shape: Shape, isNew: boolean) {
+  ui.selected = shape.id;
+  ui.draft = shape.text;
+  ui.editing = { id: shape.id, kind: shape.kind, text: shape.text, original: shape.text, isNew, height: bounds(shape).h };
+}
+
+function commitEdit(shapes: LiveView<Shape>, ui: BoardUi) {
+  let ed = ui.editing;
+
+  if (!ed) {
+    return;
+  }
+
+  ui.editing = null;
+
+  let row = shapes.get(ed.id);
+  if (!row) {
+    return;
+  }
+
+  let text = ui.draft.replace(/\s+$/, "");
+
+  if (row.kind === "text" && text.trim() === "") {
+    patchShape(shapes, row.id, { deleted: true, text: "" });
+
+    if (ed.isNew) {
+      ui.undo.pop();
+    } else {
+      pushStep(ui, [{ id: row.id, before: { deleted: false, text: ed.original }, after: { deleted: true, text: "" } }]);
+    }
+
+    ui.selected = "";
+    return;
+  }
+
+  if (text === ed.original) {
+    return;
+  }
+
+  let patch: Partial<Shape> = { text };
+  if (row.kind === "text") {
+    patch.h = Math.max(ed.height, fontSize(row.strokeWidth) * 1.3);
+  }
+
+  patchShape(shapes, row.id, patch);
+
+  // A new note's text belongs to the step that made it: undo removes the note.
+  if (!ed.isNew) {
+    pushStep(ui, [{ id: row.id, before: { text: ed.original, h: row.h }, after: patch }]);
+  }
+}
+
+function onEditorInsert(el: Element) {
+  editorEl = el as HTMLTextAreaElement;
+  // The board is overflow: hidden, and a plain focus() would scroll it to the editor.
+  editorEl.focus({ preventScroll: true });
+  editorEl.setSelectionRange(editorEl.value.length, editorEl.value.length);
+}
+
+function onEditorInput(ui: BoardUi) {
+  if (ui.editing && ui.editing.kind === "text" && editorEl) {
+    ui.editing.height = Math.max(ui.editing.height, editorEl.scrollHeight);
+  }
+}
+
+function onEditorKeyDown(e: KeyboardEvent, shapes: LiveView<Shape>, ui: BoardUi) {
+  e.stopPropagation();
+
+  if (e.key === "Escape" || (e.key === "Enter" && (e.metaKey || e.ctrlKey))) {
+    e.preventDefault();
+    commitEdit(shapes, ui);
+  }
+}
+
+function eraseAt(e: PointerEvent, shapes: LiveView<Shape>, g: { changes: Change[] }) {
+  let hit = document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-id]");
+  let id = hit?.getAttribute("data-id");
+
+  if (!id || g.changes.some((c) => c.id === id)) {
+    return;
+  }
+
+  let row = shapes.get(id);
+  if (!row || row.deleted) {
+    return;
+  }
+
+  g.changes.push({ id, before: { deleted: false }, after: { deleted: true } });
+  patchShape(shapes, id, { deleted: true });
+}
+
+function eraseSelected(shapes: LiveView<Shape>, ui: BoardUi) {
+  let row = ui.selected ? shapes.get(ui.selected) : undefined;
+
+  if (!row || row.deleted) {
+    return;
+  }
+
+  ui.selected = "";
+  patchShape(shapes, row.id, { deleted: true });
+  pushStep(ui, [{ id: row.id, before: { deleted: false }, after: { deleted: true } }]);
+}
+
+function onPointerDown(e: PointerEvent, shapes: LiveView<Shape>, ui: BoardUi, env: Env) {
+  let target = e.target as Element;
+
+  if (target.closest(".board-editor")) {
+    return;
+  }
+
+  // Blurring the editor commits it from its own handler. Awaiting the commit
+  // here would start this gesture after the pointer was already released.
+  if (ui.editing) {
+    editorEl?.blur();
+  }
+
+  surfaceEl?.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, screenPoint(e));
+
+  // A second finger turns whatever the first one started into a pinch.
+  if (pointers.size === 2) {
+    cancelGesture(ui, env);
+
+    let [a, b] = [...pointers.values()];
+    gesture = {
+      mode: "pinch",
+      dist: Math.hypot(a.sx - b.sx, a.sy - b.sy) || 1,
+      mx: (a.sx + b.sx) / 2,
+      my: (a.sy + b.sy) / 2,
+      camX: ui.camera.x,
+      camY: ui.camera.y,
+      zoom: ui.camera.zoom,
+    };
+    return;
+  }
+
+  let p = toBoard(e, ui);
+  let { sx, sy } = screenPoint(e);
+  let shapeEl = target.closest("[data-id]");
+  let handleEl = target.closest("[data-handle]");
+
+  if (e.button === 1 || ui.tool === "hand" || spaceDown) {
+    gesture = { mode: "pan", sx, sy, camX: ui.camera.x, camY: ui.camera.y };
+    ui.panning = true;
+    return;
+  }
+
+  switch (ui.tool) {
+    case "select": {
+      let selected = ui.selected ? shapes.get(ui.selected) : undefined;
+
+      if (handleEl && selected) {
+        let handle = handleEl.getAttribute("data-handle") as Handle;
+        gesture = { mode: "resize", id: selected.id, orig: { ...selected }, handle, ox: p.x, oy: p.y };
+        return;
+      }
+
+      let id = shapeEl?.getAttribute("data-id");
+      let row = id ? shapes.get(id) : undefined;
+
+      if (row) {
+        ui.selected = row.id;
+        gesture = { mode: "move", id: row.id, orig: { ...row }, ox: p.x, oy: p.y, moved: false };
+        return;
+      }
+
+      // Dragging empty board pans, so a phone can get around without a hand tool.
+      ui.selected = "";
+      gesture = { mode: "pan", sx, sy, camX: ui.camera.x, camY: ui.camera.y };
+      ui.panning = true;
+      return;
+    }
+
+    case "pen": {
+      let id = newId();
+      ui.inks.push({ id, clientId: env.clientId, color: ui.color, strokeWidth: ui.strokeWidth, flat: [p.x, p.y], at: Date.now() });
+      gesture = { mode: "pen", id, sent: 0 };
+      return;
+    }
+
+    case "rect":
+    case "arrow": {
+      let shape = newShape(ui, env, ui.tool, { x: p.x, y: p.y, w: 0, h: 0 });
+      setGhost(ui, env, shape.id, shape);
+      gesture = { mode: "create", id: shape.id, kind: ui.tool, ox: p.x, oy: p.y };
+      return;
+    }
+
+    case "note": {
+      let shape = newShape(ui, env, "note", { x: p.x - NOTE_SIZE / 2, y: p.y - NOTE_SIZE / 2, w: NOTE_SIZE, h: NOTE_SIZE });
+      shape.color = noteColor(ui.color);
+      insertShape(shapes, ui, shape);
+      beginEdit(ui, shape, true);
+      ui.tool = "select";
+      return;
+    }
+
+    case "text": {
+      let size = fontSize(ui.strokeWidth);
+      let shape = newShape(ui, env, "text", { x: p.x, y: p.y - size * 0.6, w: 320, h: size * 1.3 });
+      insertShape(shapes, ui, shape);
+      beginEdit(ui, shape, true);
+      ui.tool = "select";
+      return;
+    }
+
+    case "eraser": {
+      let g = { mode: "erase" as const, changes: [] as Change[] };
+      gesture = g;
+      eraseAt(e, shapes, g);
+      return;
+    }
+  }
+}
+
+function cancelGesture(ui: BoardUi, env: Env) {
+  let g = gesture;
+  gesture = null;
+  ui.panning = false;
+
+  if (!g) {
+    return;
+  }
+
+  if (g.mode === "pen") {
+    dropInk(ui, g.id);
+    send(`settle:${g.id}`, { kind: "settle", boardId: env.boardId, clientId: env.clientId, id: g.id });
+  }
+
+  if (g.mode === "create" || g.mode === "move" || g.mode === "resize") {
+    dropGhost(ui, g.id, env.clientId);
+    send(`settle:${g.id}`, { kind: "settle", boardId: env.boardId, clientId: env.clientId, id: g.id });
+  }
+}
+
+function onPointerMove(e: PointerEvent, shapes: LiveView<Shape>, ui: BoardUi, env: Env) {
+  let p = toBoard(e, ui);
+
+  if (pointers.has(e.pointerId)) {
+    pointers.set(e.pointerId, screenPoint(e));
+  }
+
+  send("cursor", {
+    kind: "cursor",
+    boardId: env.boardId,
+    clientId: env.clientId,
+    name: env.me.name,
+    color: env.me.color,
+    x: Math.round(p.x),
+    y: Math.round(p.y),
+  });
+
+  let g = gesture;
+  if (!g) {
+    return;
+  }
+
+  switch (g.mode) {
+    case "pan": {
+      let { sx, sy } = screenPoint(e);
+      ui.camera = { ...ui.camera, x: g.camX - (sx - g.sx) / ui.camera.zoom, y: g.camY - (sy - g.sy) / ui.camera.zoom };
+      return;
+    }
+
+    case "pen": {
+      let ink = ui.inks.find((k) => k.id === g.id);
+      if (!ink) {
+        return;
+      }
+
+      ink.flat.push(Math.round(p.x * 10) / 10, Math.round(p.y * 10) / 10);
+
+      let fresh = ink.flat.slice(g.sent);
+      g.sent = ink.flat.length;
+      send(`ink:${g.id}`, {
+        kind: "ink",
+        boardId: env.boardId,
+        clientId: env.clientId,
+        id: g.id,
+        color: ink.color,
+        strokeWidth: ink.strokeWidth,
+        points: fresh,
+      });
+      return;
+    }
+
+    case "create": {
+      let w = p.x - g.ox;
+      let h = p.y - g.oy;
+
+      if (e.shiftKey && g.kind === "rect") {
+        let side = Math.max(Math.abs(w), Math.abs(h));
+        w = Math.sign(w || 1) * side;
+        h = Math.sign(h || 1) * side;
+      }
+
+      setGhost(ui, env, g.id, { w, h });
+      return;
+    }
+
+    case "move": {
+      let dx = p.x - g.ox;
+      let dy = p.y - g.oy;
+
+      if (!g.moved && Math.hypot(dx, dy) * ui.camera.zoom < 3) {
+        return;
+      }
+
+      g.moved = true;
+      setGhost(ui, env, g.id, { x: g.orig.x + dx, y: g.orig.y + dy });
+      return;
+    }
+
+    case "resize": {
+      let keepRatio = e.shiftKey || g.orig.kind === "pen";
+      setGhost(ui, env, g.id, resize(g.orig, g.handle, p.x - g.ox, p.y - g.oy, keepRatio));
+      return;
+    }
+
+    case "erase":
+      eraseAt(e, shapes, g);
+      return;
+
+    case "pinch": {
+      if (pointers.size < 2) {
+        return;
+      }
+
+      let [a, b] = [...pointers.values()];
+      let zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, g.zoom * (Math.hypot(a.sx - b.sx, a.sy - b.sy) / g.dist)));
+      let mx = (a.sx + b.sx) / 2;
+      let my = (a.sy + b.sy) / 2;
+      let wx = g.mx / g.zoom + g.camX;
+      let wy = g.my / g.zoom + g.camY;
+
+      ui.camera = { x: wx - mx / zoom, y: wy - my / zoom, zoom };
+      return;
+    }
+  }
+}
+
+function onPointerUp(e: PointerEvent, shapes: LiveView<Shape>, ui: BoardUi, env: Env) {
+  pointers.delete(e.pointerId);
+
+  // Lifting one finger of a pinch ends it; the other finger starts nothing.
+  if (gesture?.mode === "pinch") {
+    if (pointers.size === 0) {
+      gesture = null;
+    }
+    return;
+  }
+
+  let g = gesture;
+  gesture = null;
+  ui.panning = false;
+
+  if (!g) {
+    return;
+  }
+
+  switch (g.mode) {
+    case "pen": {
+      let ink = ui.inks.find((k) => k.id === g.id);
+      if (!ink) {
+        return;
+      }
+
+      let flat = simplify(ink.flat, 1.5 / ui.camera.zoom);
+      if (flat.length === 2) {
+        flat = [flat[0], flat[1], flat[0] + 0.5, flat[1] + 0.5];
+      }
+
+      let packed = packStroke(flat, ink.strokeWidth);
+      let shape = newShape(ui, env, "pen", packed);
+      shape.id = ink.id;
+      shape.points = packed.points;
+      shape.color = ink.color;
+      shape.strokeWidth = ink.strokeWidth;
+
+      insertShape(shapes, ui, shape, () => dropInk(ui, shape.id));
+      settle(env, shape.id);
+      return;
+    }
+
+    case "create": {
+      let ghost = ui.ghosts.find((k) => k.id === g.id && k.clientId === env.clientId);
+      if (!ghost) {
+        return;
+      }
+
+      let shape = { ...(ghost.shape as Shape) };
+
+      // A click without a drag still makes something the size of a click's intent.
+      if (Math.abs(shape.w) < 6 && Math.abs(shape.h) < 6) {
+        if (shape.kind === "rect") {
+          shape = { ...shape, x: shape.x - 80, y: shape.y - 50, w: 160, h: 100 };
+        } else {
+          shape = { ...shape, w: 140, h: 0 };
+        }
+      }
+
+      insertShape(shapes, ui, shape, () => dropGhost(ui, g.id, env.clientId));
+      settle(env, shape.id);
+      return;
+    }
+
+    case "move":
+    case "resize": {
+      let ghost = ui.ghosts.find((k) => k.id === g.id && k.clientId === env.clientId);
+
+      if (!ghost || (g.mode === "move" && !g.moved)) {
+        dropGhost(ui, g.id, env.clientId);
+        return;
+      }
+
+      let after: Partial<Shape> = { x: ghost.shape.x, y: ghost.shape.y, w: ghost.shape.w ?? g.orig.w, h: ghost.shape.h ?? g.orig.h };
+      let before: Partial<Shape> = { x: g.orig.x, y: g.orig.y, w: g.orig.w, h: g.orig.h };
+
+      patchShape(shapes, g.id, after, () => dropGhost(ui, g.id, env.clientId));
+      pushStep(ui, [{ id: g.id, before, after }]);
+      settle(env, g.id);
+      return;
+    }
+
+    case "erase":
+      pushStep(ui, g.changes);
+      return;
+  }
+}
+
+function onPointerLeave(ui: BoardUi, env: Env) {
+  if (gesture) {
+    return;
+  }
+
+  send("cursor", { kind: "away", boardId: env.boardId, clientId: env.clientId });
+}
+
+function onDoubleClick(e: MouseEvent, shapes: LiveView<Shape>, ui: BoardUi) {
+  let id = (e.target as Element).closest("[data-id]")?.getAttribute("data-id");
+  let row = id ? shapes.get(id) : undefined;
+
+  if (row && (row.kind === "note" || row.kind === "text")) {
+    beginEdit(ui, row, false);
+  }
+}
+
+function onWheel(e: WheelEvent, ui: BoardUi) {
+  e.preventDefault();
+
+  let { sx, sy } = screenPoint(e);
+
+  if (e.ctrlKey || e.metaKey) {
+    ui.camera = zoomAt(ui.camera, Math.exp(-e.deltaY * 0.01), sx, sy);
+    return;
+  }
+
+  ui.camera = { ...ui.camera, x: ui.camera.x + e.deltaX / ui.camera.zoom, y: ui.camera.y + e.deltaY / ui.camera.zoom };
+}
+
+function onZoom(ui: BoardUi, factor: number) {
+  let w = surfaceEl?.clientWidth ?? 0;
+  let h = surfaceEl?.clientHeight ?? 0;
+
+  ui.camera = zoomAt(ui.camera, factor, w / 2, h / 2);
+}
+
+function onFit(shapes: LiveView<Shape>, ui: BoardUi) {
+  // Leave room for the toolbar docked over the bottom of the board.
+  ui.camera = fitCamera([...shapes], surfaceEl?.clientWidth ?? 0, surfaceEl?.clientHeight ?? 0, 72);
+}
+
+/** The camera is the only way the board moves; undo any scroll the browser does on its own. */
+function onSurfaceScroll(el: Element) {
+  el.scrollTop = 0;
+  el.scrollLeft = 0;
+}
+
+function onSurfaceInsert(el: Element, shapes: LiveView<Shape>, ui: BoardUi) {
+  surfaceEl = el as HTMLElement;
+  onFit(shapes, ui);
+  ui.ready = true;
+}
+
+function onPickTool(ui: BoardUi, tool: Tool) {
+  ui.tool = tool;
+
+  if (tool !== "select") {
+    ui.selected = "";
+  }
+}
+
+function onPickColor(shapes: LiveView<Shape>, ui: BoardUi, color: string) {
+  ui.color = color;
+
+  let row = ui.selected ? shapes.get(ui.selected) : undefined;
+  if (row && row.color !== color) {
+    pushStep(ui, [{ id: row.id, before: { color: row.color }, after: { color } }]);
+    patchShape(shapes, row.id, { color });
+  }
+}
+
+function onPickWidth(shapes: LiveView<Shape>, ui: BoardUi, strokeWidth: number) {
+  ui.strokeWidth = strokeWidth;
+
+  let row = ui.selected ? shapes.get(ui.selected) : undefined;
+  if (row && row.kind !== "note" && row.strokeWidth !== strokeWidth) {
+    pushStep(ui, [{ id: row.id, before: { strokeWidth: row.strokeWidth }, after: { strokeWidth } }]);
+    patchShape(shapes, row.id, { strokeWidth });
+  }
+}
+
+function onKeyDown(e: KeyboardEvent, shapes: LiveView<Shape>, ui: BoardUi) {
+  let target = e.target as HTMLElement;
+  if (target.closest("input, textarea, [contenteditable]")) {
+    return;
+  }
+
+  let mod = e.metaKey || e.ctrlKey;
+  let key = e.key.toLowerCase();
+
+  if (mod && key === "z") {
+    e.preventDefault();
+    if (e.shiftKey) {
+      onRedo(shapes, ui);
+    } else {
+      onUndo(shapes, ui);
+    }
+    return;
+  }
+
+  if (mod && key === "y") {
+    e.preventDefault();
+    onRedo(shapes, ui);
+    return;
+  }
+
+  if (mod) {
+    return;
+  }
+
+  if (key === " ") {
+    e.preventDefault();
+    spaceDown = true;
+    ui.panning = true;
+    return;
+  }
+
+  if (key === "delete" || key === "backspace") {
+    e.preventDefault();
+    eraseSelected(shapes, ui);
+    return;
+  }
+
+  if (key === "escape") {
+    ui.selected = "";
+    return;
+  }
+
+  if (key === "enter") {
+    let row = ui.selected ? shapes.get(ui.selected) : undefined;
+    if (row && (row.kind === "note" || row.kind === "text")) {
+      e.preventDefault();
+      beginEdit(ui, row, false);
+    }
+    return;
+  }
+
+  let tool = TOOLS.find((t) => t.key.toLowerCase() === key);
+  if (tool) {
+    onPickTool(ui, tool.id);
+  }
+}
+
+function onKeyUp(e: KeyboardEvent, ui: BoardUi) {
+  if (e.key === " ") {
+    spaceDown = false;
+    ui.panning = false;
+  }
+}
+
+function onEvent(ev: BoardEvent, ui: BoardUi) {
+  let now = Date.now();
+
+  switch (ev.kind) {
+    case "cursor": {
+      let c = ui.cursors.find((k) => k.id === ev.clientId);
+
+      if (c) {
+        c.x = ev.x;
+        c.y = ev.y;
+        c.at = now;
+      } else {
+        ui.cursors.push({ id: ev.clientId, name: ev.name, color: ev.color, x: ev.x, y: ev.y, at: now });
+      }
+      return;
+    }
+
+    case "ink": {
+      let ink = ui.inks.find((k) => k.id === ev.id);
+
+      if (ink) {
+        ink.flat.push(...ev.points);
+        ink.at = now;
+      } else {
+        ui.inks.push({ id: ev.id, clientId: ev.clientId, color: ev.color, strokeWidth: ev.strokeWidth, flat: ev.points, at: now });
+      }
+      return;
+    }
+
+    case "ghost": {
+      let ghost = ui.ghosts.find((g) => g.id === ev.id && g.clientId === ev.clientId);
+
+      if (ghost) {
+        ghost.shape = ev.shape;
+        ghost.at = now;
+      } else {
+        ui.ghosts.push({ id: ev.id, clientId: ev.clientId, shape: ev.shape, at: now });
+      }
+      return;
+    }
+
+    // The write lands on its own channel; hold the preview a beat so the
+    // shape never jumps back to where it was.
+    case "settle":
+      setTimeout(() => {
+        dropGhost(ui, ev.id, ev.clientId);
+        dropInk(ui, ev.id);
+      }, 300);
+      return;
+
+    case "away": {
+      let i = ui.cursors.findIndex((k) => k.id === ev.clientId);
+      if (i >= 0) {
+        ui.cursors.splice(i, 1);
+      }
+      return;
+    }
+
+    case "leave":
+      prune(ui, (clientId) => clientId === ev.clientId);
+      return;
+  }
+}
+
+/** Drops what a page left behind: everything from `gone`, and anything stale. */
+function prune(ui: BoardUi, gone: (clientId: string) => boolean) {
+  let now = Date.now();
+
+  for (let i = ui.cursors.length - 1; i >= 0; i--) {
+    if (gone(ui.cursors[i].id) || now - ui.cursors[i].at > 120_000) {
+      ui.cursors.splice(i, 1);
+    }
+  }
+
+  for (let i = ui.ghosts.length - 1; i >= 0; i--) {
+    let g = ui.ghosts[i];
+    if (g.clientId !== gesturingClient(ui) && (gone(g.clientId) || now - g.at > 15_000)) {
+      ui.ghosts.splice(i, 1);
+    }
+  }
+
+  for (let i = ui.inks.length - 1; i >= 0; i--) {
+    let k = ui.inks[i];
+    if (k.clientId !== gesturingClient(ui) && (gone(k.clientId) || now - k.at > 15_000)) {
+      ui.inks.splice(i, 1);
+    }
+  }
+}
+
+function gesturingClient(ui: BoardUi): string {
+  return gesture ? ui.clientId : "";
+}
+
+function onInit(listener: Listener<BoardEvent>, shapes: LiveView<Shape>, ui: BoardUi) {
+  listener.on("notify", (ev) => onEvent(ev, ui));
+
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.addEventListener("keydown", (e) => onKeyDown(e, shapes, ui));
+  window.addEventListener("keyup", (e) => onKeyUp(e, ui));
+  window.addEventListener("blur", () => spaceDown = false);
+  setInterval(() => prune(ui, () => false), 5000);
+}
+
+function onRename(ui: BoardUi, env: Env) {
+  renameBoard(env.boardId, ui.title);
+  document.title = `${ui.title} · sketchmoor`;
+}
+
+function onTitleKeyDown(e: KeyboardEvent) {
+  if (e.key === "Enter" || e.key === "Escape") {
+    (e.target as HTMLInputElement).blur();
+  }
+}
+
+function onShare(ui: BoardUi) {
+  ui.copied = true;
+  setTimeout(() => ui.copied = false, 2200);
+
+  try {
+    navigator.clipboard.writeText(location.href).catch(() => {});
+  } catch {
+    // An insecure origin has no clipboard; the url is still in the address bar.
+  }
+}
+
+function selectedShape(shapes: LiveView<Shape>, ui: BoardUi): Shape | undefined {
+  if (!ui.selected || ui.editing) {
+    return undefined;
+  }
+
+  return visibleShapes(shapes, ui.ghosts).find((s) => s.id === ui.selected);
+}
+
+function liveInks(shapes: LiveView<Shape>, ui: BoardUi) {
+  return ui.inks.filter((k) => k.clientId === ui.clientId || !shapes.get(k.id));
+}
+
+function worldStyle(ui: BoardUi): string {
+  let { x, y, zoom } = ui.camera;
+
+  return `transform: translate(${-x * zoom}px, ${-y * zoom}px) scale(${zoom}); --zoom: ${zoom};` +
+    (ui.ready ? "" : " visibility: hidden;");
+}
+
+function surfaceStyle(ui: BoardUi): string {
+  let { x, y, zoom } = ui.camera;
+  let size = 24 * zoom;
+
+  // Zoomed far out the dots would turn to texture; space them out instead.
+  while (size < 12) {
+    size *= 2;
+  }
+
+  return `background-size: ${size}px ${size}px; background-position: ${-x * zoom}px ${-y * zoom}px;`;
+}
+
+function shapeStyle(s: Shape): string {
+  let b = bounds(s);
+  let style = `left: ${b.x}px; top: ${b.y}px; width: ${b.w}px; height: ${b.h}px;`;
+
+  if (s.kind === "note") {
+    style += ` background: ${notePaper(s.color)};`;
+  }
+
+  if (s.kind === "text") {
+    style += ` color: ${s.color}; font-size: ${fontSize(s.strokeWidth)}px;`;
+  }
+
+  return style;
+}
+
+function editorStyle(shapes: LiveView<Shape>, ui: BoardUi): string {
+  let row = ui.editing ? shapes.get(ui.editing.id) : undefined;
+
+  if (!row || !ui.editing) {
+    return "display: none;";
+  }
+
+  let b = bounds(row);
+  let style = `left: ${b.x}px; top: ${b.y}px; width: ${b.w}px; height: ${ui.editing.kind === "text" ? ui.editing.height : b.h}px;`;
+
+  if (row.kind === "note") {
+    style += ` background: ${notePaper(row.color)};`;
+  } else {
+    style += ` color: ${row.color}; font-size: ${fontSize(row.strokeWidth)}px;`;
+  }
+
+  return style;
+}
+
+interface HandleSpot {
+  id: Handle;
+  x: number;
+  y: number;
+}
+
+function handlesFor(s: Shape): HandleSpot[] {
+  let b = bounds(s);
+
+  if (s.kind === "arrow") {
+    return [
+      { id: "start", x: s.x - b.x, y: s.y - b.y },
+      { id: "end", x: s.x + s.w - b.x, y: s.y + s.h - b.y },
+    ];
+  }
+
+  return [
+    { id: "nw", x: 0, y: 0 },
+    { id: "ne", x: b.w, y: 0 },
+    { id: "sw", x: 0, y: b.h },
+    { id: "se", x: b.w, y: b.h },
+  ];
+}
+
+function selectionStyle(s: Shape): string {
+  let b = bounds(s);
+
+  return `left: ${b.x}px; top: ${b.y}px; width: ${b.w}px; height: ${b.h}px;` +
+    (s.kind === "arrow" ? " border-color: transparent;" : "");
+}
+
+function hint(ui: BoardUi): string {
+  switch (ui.tool) {
+    case "pen":
+      return "Draw anywhere. Pick a color and width below.";
+
+    case "note":
+      return "Click to place a sticky note.";
+
+    case "rect":
+      return "Drag to draw a rectangle. Hold Shift for a square.";
+
+    case "arrow":
+      return "Drag from where the arrow starts to where it points.";
+
+    case "text":
+      return "Click to add text.";
+
+    case "eraser":
+      return "Click or drag across shapes to erase them.";
+
+    default:
+      return "";
+  }
+}
+
+function presence(members: Member[], ui: BoardUi, me: Member) {
+  let online = new Set(ui.cursors.map((c) => c.name));
+
+  return members
+    .map((m) => ({ ...m, online: m.id === me.id || online.has(m.name) }))
+    .sort((a, b) => Number(b.online) - Number(a.online))
+    .slice(0, 6);
+}
+
+<ToolIcon (tool: string)>
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <g e:switch={tool}>
+      <path e:case="select" d="M5.5 3.5 19 10.2l-6.1 2-2.3 6.3Z"/>
+      <path e:case="hand" d="M8 13V5.5a1.5 1.5 0 0 1 3 0V11m0-6.5a1.5 1.5 0 0 1 3 0V11m0-4.5a1.5 1.5 0 0 1 3 0V14c0 4-2.5 7-6.5 7S5.5 18.5 4.4 16.2L2.8 13a1.5 1.5 0 0 1 2.6-1.5L8 15"/>
+      <path e:case="pen" d="M4 20l4.2-1L19.5 7.7a2.1 2.1 0 0 0-3-3L5.2 16Zm10.5-13.5 3 3"/>
+      <path e:case="note" d="M4.5 4.5h15v10l-5 5h-10Zm10 15v-5h5"/>
+      <rect e:case="rect" x="3.5" y="6" width="17" height="12" rx="2"/>
+      <path e:case="arrow" d="M5 19 19 5m-8.5 0H19v8.5"/>
+      <path e:case="text" d="M5 7V4.5h14V7M12 4.5v15m-3 0h6"/>
+      <path e:case="eraser" d="M8 20h11M4.8 14.6l8.8-8.8a2 2 0 0 1 2.8 0l2.8 2.8a2 2 0 0 1 0 2.8L13 17.6 10 20H8.4Zm4.2-4.2 5.6 5.6"/>
+      <path e:case="undo" d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>
+      <path e:case="redo" d="m15 14 5-5-5-5m5 5H9.5a5.5 5.5 0 0 0 0 11H13"/>
+      <path e:case="share" d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>
+      <path e:case="check" d="m5 12.5 4.5 4.5L19 7.5"/>
+      <path e:case="minus" d="M6 12h12"/>
+      <path e:case="plus" d="M6 12h12M12 6v12"/>
+      <path e:case="fit" d="M4 9V4h5m6 0h5v5m0 6v5h-5m-6 0H4v-5"/>
+    </g>
+  </svg>
+</ToolIcon>
+
+<ShapeView (shape: Shape, editing: boolean)>
+  <div class={["shape", `is-${shape.kind}`, (shape.kind === "note" || shape.kind === "text") && !shape.text && !editing && "is-empty"]}
+       data-id={shape.id}
+       style={shapeStyle(shape)}>
+    <svg e:if={shape.kind === "pen"} width={shape.w} height={shape.h}>
+      <polyline class="shape-hit" points={penPoints(shape)} fill="none" stroke="transparent" stroke-width={Math.max(16, shape.strokeWidth + 12)} stroke-linecap="round" stroke-linejoin="round" pointer-events="stroke"/>
+      <polyline points={penPoints(shape)} fill="none" stroke={shape.color} stroke-width={shape.strokeWidth} stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <svg e:elseif={shape.kind === "rect"} width={Math.abs(shape.w)} height={Math.abs(shape.h)}>
+      <rect class="shape-hit" x="0" y="0" width={Math.abs(shape.w)} height={Math.abs(shape.h)} rx="8" fill="none" stroke="transparent" stroke-width={Math.max(16, shape.strokeWidth + 12)} pointer-events="stroke"/>
+      <rect x="0" y="0" width={Math.abs(shape.w)} height={Math.abs(shape.h)} rx="8" fill="none" stroke={shape.color} stroke-width={shape.strokeWidth}/>
+    </svg>
+    <svg e:elseif={shape.kind === "arrow"} width={Math.max(1, Math.abs(shape.w))} height={Math.max(1, Math.abs(shape.h))}>
+      <path class="shape-hit" d={arrowPath(shape)} fill="none" stroke="transparent" stroke-width={Math.max(16, shape.strokeWidth + 12)} stroke-linecap="round" pointer-events="stroke"/>
+      <path d={arrowPath(shape)} fill="none" stroke={shape.color} stroke-width={shape.strokeWidth} stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <span e:else class="shape-text">{editing ? "" : shape.text}</span>
+  </div>
+</ShapeView>
+
+<html lang="en" class="page-board" (
+  board: { id: string; title: string },
+  me: Member,
+  clientId: string,
+  listener: Listener<BoardEvent>,
+  members: Member[],
+  shapes: LiveView<Shape>,
+  private env: Env = { boardId: board.id, clientId, me },
+  private ui: BoardUi = {
+    tool: "select" as Tool,
+    color: COLORS[0],
+    strokeWidth: 4,
+    camera: { x: 0, y: 0, zoom: 1 },
+    selected: "",
+    editing: null,
+    draft: "",
+    ghosts: [],
+    inks: [],
+    cursors: [],
+    undo: [],
+    redo: [],
+    title: board.title,
+    copied: false,
+    panning: false,
+    ready: false,
+    clientId,
+  },
+) oninit={() => onInit(listener, shapes, ui)}>
+  <head>
+    <title>{board.title} · sketchmoor</title>
+    <meta name="description" content="A shared sketchmoor board.">
+    <link rel="icon" type="image/svg+xml" href={favicon} />
+  </head>
+  <body>
+    <div class="board-app">
+      <header class="board-bar row">
+        <div class="board-bar-start row">
+          <a class="board-home" href="/" aria-label="All boards">
+            <svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true">
+              <rect width="24" height="24" rx="5" fill="#6f3fa8"/>
+              <path d="M5 15.5c2-4 3.5-6 5-6s1 5 3 5 2.5-5 4.5-7" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+              <circle cx="18" cy="17.5" r="1.6" fill="#ffd166"/>
+            </svg>
+          </a>
+          <input class="board-title"
+                 value={ui.title}
+                 aria-label="Board name"
+                 onchange={() => onRename(ui, env)}
+                 onkeydown={(e) => onTitleKeyDown(e)}>
+        </div>
+
+        <div class="board-bar-end row">
+          <div class="board-people" aria-label="People on this board">
+            <span e:for={p of presence(members, ui, me)}
+                  class={["board-person", !p.online && "is-away"]}
+                  style={{ background: p.color }}
+                  title={p.online ? `${p.name}, here now` : p.name}>{initials(p.name)}</span>
+          </div>
+          <span class="board-share-note">{ui.copied ? "Anyone with an account can open it" : ""}</span>
+          <button class={["is-sm", ui.copied ? "is-ghost" : "is-primary"]} aria-label="Copy share link" onclick={() => onShare(ui)}>
+            <span class="row is-xs">
+              <ToolIcon tool={ui.copied ? "check" : "share"}/>
+              <span class="board-share-label">{ui.copied ? "Link copied" : "Share"}</span>
+            </span>
+          </button>
+        </div>
+      </header>
+
+      <main class={["board-surface", ui.panning && "is-panning"]}
+            data-tool={ui.tool}
+            style={surfaceStyle(ui)}
+            oninsert={(e) => onSurfaceInsert(e.target, shapes, ui)}
+            onpointerdown={(e) => onPointerDown(e, shapes, ui, env)}
+            onpointermove={(e) => onPointerMove(e, shapes, ui, env)}
+            onpointerup={(e) => onPointerUp(e, shapes, ui, env)}
+            onpointercancel={(e) => onPointerUp(e, shapes, ui, env)}
+            onpointerleave={() => onPointerLeave(ui, env)}
+            ondblclick={(e) => onDoubleClick(e, shapes, ui)}
+            onwheel={(e) => onWheel(e, ui)}
+            onscroll={(e) => onSurfaceScroll(e.target as Element)}>
+        <div class="board-world" style={worldStyle(ui)}>
+          <ShapeView e:for={shape of visibleShapes(shapes, ui.ghosts)} shape={shape} editing={ui.editing?.id === shape.id}/>
+
+          <svg class="board-inks" width="1" height="1">
+            <polyline e:for={ink of liveInks(shapes, ui)}
+                      points={inkPoints(ink.flat)}
+                      fill="none"
+                      stroke={ink.color}
+                      stroke-width={ink.strokeWidth}
+                      stroke-linecap="round"
+                      stroke-linejoin="round"/>
+          </svg>
+
+          <div e:if={selectedShape(shapes, ui)} class="board-selection" style={selectionStyle(selectedShape(shapes, ui)!)}>
+            <span e:for={h of handlesFor(selectedShape(shapes, ui)!)}
+                  class="board-handle"
+                  data-handle={h.id}
+                  style={`left: ${h.x}px; top: ${h.y}px;`}></span>
+          </div>
+
+          <textarea e:if={ui.editing}
+                    class={["board-editor", `is-${ui.editing?.kind}`]}
+                    style={editorStyle(shapes, ui)}
+                    value={ui.draft}
+                    rows={1}
+                    placeholder="Type something"
+                    oninsert={(e) => onEditorInsert(e.target)}
+                    oninput={() => onEditorInput(ui)}
+                    onblur={() => commitEdit(shapes, ui)}
+                    onkeydown={(e) => onEditorKeyDown(e, shapes, ui)}/>
+
+          <div e:for={c of ui.cursors} class="board-cursor" style={`left: ${c.x}px; top: ${c.y}px;`}>
+            <svg width="18" height="20" viewBox="0 0 16 18" aria-hidden="true">
+              <path d="M1 1 L1 15 L5 11 L8 17 L10.5 16 L7.5 10 L13 10 Z" fill={c.color} stroke="#fff" stroke-width="1.2" stroke-linejoin="round"/>
+            </svg>
+            <span style={{ background: c.color }}>{firstName(c.name)}</span>
+          </div>
+        </div>
+
+        <p e:if={hint(ui)} class="board-hint">{hint(ui)}</p>
+      </main>
+
+      <div class="board-zoom row" style="position: fixed">
+        <button class="board-tool" aria-label="Zoom out" onclick={() => onZoom(ui, 1 / 1.25)}><ToolIcon tool="minus"/></button>
+        <button class="board-zoom-level" aria-label="Fit board to screen" onclick={() => onFit(shapes, ui)}>{Math.round(ui.camera.zoom * 100)}%</button>
+        <button class="board-tool" aria-label="Zoom in" onclick={() => onZoom(ui, 1.25)}><ToolIcon tool="plus"/></button>
+      </div>
+
+      <div class="board-dock" style="position: fixed">
+        <div class="board-tools row" role="toolbar" aria-label="Drawing tools">
+          <div class="board-tool-group">
+            <button e:for={t of TOOLS}
+                    e:key={(t) => t.id}
+                    class={["board-tool", ui.tool === t.id && "is-active"]}
+                    title={`${t.label} (${t.key})`}
+                    aria-label={t.label}
+                    aria-pressed={ui.tool === t.id}
+                    onclick={() => onPickTool(ui, t.id)}><ToolIcon tool={t.id}/></button>
+          </div>
+
+          <span class="divider is-vertical"></span>
+
+          <div class="board-tool-group">
+            <button e:for={c of COLORS}
+                    e:key={(c) => c}
+                    class={["board-swatch", ui.color === c && "is-active"]}
+                    aria-label={`Color ${c}`}
+                    aria-pressed={ui.color === c}
+                    onclick={() => onPickColor(shapes, ui, c)}><span style={{ background: c }}></span></button>
+          </div>
+
+          <span class="divider is-vertical"></span>
+
+          <div class="board-tool-group">
+            <button e:for={w of WIDTHS}
+                    e:key={(w) => w.value}
+                    class={["board-tool", "board-width", ui.strokeWidth === w.value && "is-active"]}
+                    title={w.label}
+                    aria-label={`${w.label} line`}
+                    aria-pressed={ui.strokeWidth === w.value}
+                    onclick={() => onPickWidth(shapes, ui, w.value)}><span style={{ height: `${w.value}px` }}></span></button>
+          </div>
+
+          <span class="divider is-vertical"></span>
+
+          <div class="board-tool-group">
+            <button class="board-tool" title="Undo (⌘Z)" aria-label="Undo" disabled={ui.undo.length === 0} onclick={() => onUndo(shapes, ui)}><ToolIcon tool="undo"/></button>
+            <button class="board-tool" title="Redo (⇧⌘Z)" aria-label="Redo" disabled={ui.redo.length === 0} onclick={() => onRedo(shapes, ui)}><ToolIcon tool="redo"/></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
