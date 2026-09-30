@@ -1,0 +1,465 @@
+@import "#app/shared/styles/page.css";
+
+.page-board,
+.page-board body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.board-app {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.board-bar {
+  z-index: 3;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg);
+}
+
+.board-bar-start {
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.board-home {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: var(--radius-md);
+}
+
+.board-home:hover {
+  background: var(--bg-soft, rgb(0 0 0 / 0.05));
+}
+
+.board-home svg {
+  display: block;
+}
+
+.board-title {
+  width: min(22rem, 40vw);
+  padding-inline: var(--space-2);
+  border-color: transparent;
+  background: transparent;
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-md);
+  box-shadow: none;
+  text-overflow: ellipsis;
+}
+
+.board-title:hover {
+  border-color: var(--rule);
+}
+
+.board-bar-end {
+  gap: var(--space-3);
+}
+
+.board-people {
+  display: flex;
+  align-items: center;
+  padding-left: 6px;
+}
+
+.board-person {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  margin-left: -6px;
+  border: 2px solid var(--bg);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: var(--weight-semibold);
+  color: #fff;
+}
+
+.board-person.is-away {
+  opacity: 0.35;
+}
+
+.board-share-note {
+  font-size: var(--text-xs);
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.board-surface {
+  position: relative;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  background-color: #fbfaf7;
+  background-image: radial-gradient(circle at 1px 1px, rgb(60 40 90 / 0.16) 1px, transparent 0);
+  color: #1f2328;
+  cursor: default;
+}
+
+.board-surface[data-tool="pen"],
+.board-surface[data-tool="rect"],
+.board-surface[data-tool="arrow"] {
+  cursor: crosshair;
+}
+
+.board-surface[data-tool="note"],
+.board-surface[data-tool="text"] {
+  cursor: copy;
+}
+
+.board-surface[data-tool="hand"],
+.board-surface.is-panning {
+  cursor: grab;
+}
+
+.board-surface[data-tool="eraser"] {
+  cursor: cell;
+}
+
+.board-world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+
+.shape {
+  position: absolute;
+}
+
+.shape > svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+/* The world layer has no width of its own, so the base max-width: 100% on svg
+   would collapse every drawing in it to nothing. */
+.board-world svg {
+  max-width: none;
+}
+
+.shape.is-note {
+  padding: 16px 16px 14px;
+  overflow: hidden;
+  border-radius: 3px;
+  box-shadow: 0 1px 2px rgb(30 20 10 / 0.12), 0 8px 18px -8px rgb(30 20 10 / 0.35);
+  font-size: 18px;
+  line-height: 1.32;
+  color: #1f2328;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.shape.is-text {
+  font-weight: 600;
+  line-height: 1.22;
+  letter-spacing: -0.01em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.shape.is-empty::before {
+  content: "Type something";
+  opacity: 0.4;
+}
+
+.board-surface[data-tool="select"] .shape.is-note,
+.board-surface[data-tool="select"] .shape.is-text {
+  cursor: move;
+}
+
+.board-surface[data-tool="select"] .shape-hit {
+  cursor: move;
+}
+
+.shape.is-erasing {
+  opacity: 0.25;
+}
+
+.board-editor {
+  position: absolute;
+  z-index: 2;
+  min-height: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 3px;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  resize: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  box-shadow: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.board-editor.is-note {
+  padding: 16px 16px 14px;
+  font-size: 18px;
+  line-height: 1.32;
+  color: #1f2328;
+}
+
+.board-editor.is-text {
+  padding: 0;
+  font-weight: 600;
+  line-height: 1.22;
+  letter-spacing: -0.01em;
+}
+
+.board-selection {
+  position: absolute;
+  z-index: 1;
+  border: calc(1.5px / var(--zoom)) solid var(--accent);
+  pointer-events: none;
+}
+
+.board-handle {
+  position: absolute;
+  width: calc(12px / var(--zoom));
+  height: calc(12px / var(--zoom));
+  margin: calc(-6px / var(--zoom)) 0 0 calc(-6px / var(--zoom));
+  border: calc(1.5px / var(--zoom)) solid var(--accent);
+  border-radius: calc(3px / var(--zoom));
+  background: #fff;
+  pointer-events: auto;
+}
+
+.board-handle[data-handle="nw"],
+.board-handle[data-handle="se"] {
+  cursor: nwse-resize;
+}
+
+.board-handle[data-handle="ne"],
+.board-handle[data-handle="sw"] {
+  cursor: nesw-resize;
+}
+
+.board-handle[data-handle="start"],
+.board-handle[data-handle="end"] {
+  border-radius: 999px;
+  cursor: grab;
+}
+
+.board-inks {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.board-cursor {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  align-items: flex-start;
+  gap: 1px;
+  transform: scale(calc(1 / var(--zoom)));
+  transform-origin: 0 0;
+  transition: left 90ms linear, top 90ms linear;
+  pointer-events: none;
+}
+
+.board-cursor svg {
+  display: block;
+  filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.25));
+}
+
+.board-cursor span {
+  margin-top: 15px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: #fff;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.18);
+}
+
+.board-dock {
+  position: absolute;
+  right: 0;
+  bottom: var(--space-4);
+  left: 0;
+  z-index: 3;
+  display: flex;
+  justify-content: center;
+  padding-inline: var(--space-3);
+  pointer-events: none;
+}
+
+.board-tools {
+  gap: var(--space-2);
+  max-width: 100%;
+  padding: var(--space-1) var(--space-2);
+  overflow-x: auto;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-xl, 14px);
+  background: var(--bg);
+  box-shadow: 0 10px 30px -10px rgb(30 20 50 / 0.35);
+  pointer-events: auto;
+  scrollbar-width: none;
+}
+
+.board-tool-group {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.board-tool {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  padding: 0;
+  border-color: transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-soft);
+}
+
+.board-tool:hover:not(:disabled) {
+  background: var(--bg-soft, rgb(0 0 0 / 0.05));
+  color: var(--ink);
+}
+
+.board-tool.is-active {
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
+.board-tool:disabled {
+  opacity: 0.35;
+}
+
+.board-tool svg {
+  display: block;
+}
+
+.board-swatch {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.board-swatch span {
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 22%, transparent);
+}
+
+.board-swatch.is-active {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--ink-soft);
+}
+
+.board-width span {
+  display: block;
+  width: 1.1rem;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.board-zoom {
+  position: absolute;
+  right: var(--space-4);
+  bottom: calc(var(--space-4) + 3.6rem);
+  z-index: 3;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  box-shadow: 0 6px 18px -8px rgb(30 20 50 / 0.3);
+}
+
+.board-zoom .board-tool {
+  width: 2rem;
+  height: 2rem;
+}
+
+.board-zoom-level {
+  min-width: 3.25rem;
+  padding: 0 var(--space-1);
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.board-hint {
+  position: absolute;
+  top: var(--space-3);
+  left: 50%;
+  z-index: 3;
+  transform: translateX(-50%);
+  padding: var(--space-1) var(--space-3);
+  border-radius: 999px;
+  background: rgb(31 35 40 / 0.82);
+  color: #fff;
+  font-size: var(--text-xs);
+  pointer-events: none;
+}
+
+@media (max-width: 40rem) {
+  .board-bar {
+    padding: var(--space-2);
+  }
+
+  .board-title {
+    width: 44vw;
+  }
+
+  .board-share-note,
+  .board-zoom,
+  .board-share-label,
+  .board-person:nth-child(n + 4) {
+    display: none;
+  }
+
+  .board-dock {
+    bottom: var(--space-2);
+  }
+
+  .board-tools {
+    flex-wrap: wrap;
+    justify-content: center;
+    row-gap: 0;
+  }
+
+  .board-tools > .divider {
+    display: none;
+  }
+
+  .board-hint {
+    width: max-content;
+    max-width: calc(100% - var(--space-6));
+    text-align: center;
+  }
+}

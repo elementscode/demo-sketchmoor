@@ -1,0 +1,114 @@
+import "./style.css";
+import { redirect, session } from "@elements/app";
+import favicon from "#app/shared/assets/favicons/favicon.svg";
+import { Board, createBoard } from "#app/shared/services/boards";
+import { signout } from "#app/shared/services/auth";
+
+interface NewBoardForm {
+  title: string;
+}
+
+/** @rpc */
+export function newBoard(title: string) {
+  let id = createBoard(title, session.getOrThrow("userId"));
+  redirect(`/b/${id}`);
+}
+
+function onSubmit(form: NewBoardForm) {
+  newBoard(form.title);
+}
+
+function onSignout() {
+  signout();
+  redirect("/signin");
+}
+
+export function timeAgo(date: Date, now: Date = new Date()): string {
+  let seconds = Math.max(0, Math.round((+now - +date) / 1000));
+
+  if (seconds < 60) {
+    return "just now";
+  }
+
+  let minutes = Math.round(seconds / 60);
+  if (minutes < 60) {
+    return `${minutes}m ago`;
+  }
+
+  let hours = Math.round(minutes / 60);
+  if (hours < 24) {
+    return `${hours}h ago`;
+  }
+
+  return `${Math.round(hours / 24)}d ago`;
+}
+
+function thumbnailUrl(board: Board): string {
+  return `/b/${board.id}/thumbnail.svg?v=${+new Date(board.updatedAt)}`;
+}
+
+<html lang="en" class="page-home" (
+  boards: Board[],
+  userName: string,
+  userColor: string,
+  private form: NewBoardForm = { title: "" },
+)>
+  <head>
+    <title>Your boards · sketchmoor</title>
+    <meta name="description" content="Your sketchmoor boards.">
+    <link rel="icon" type="image/svg+xml" href={favicon} />
+  </head>
+  <body>
+    <header class="boards-header">
+      <div class="page-shell boards-header-inner row">
+        <a href="/" class="boards-brand row">
+          <svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true">
+            <rect width="24" height="24" rx="5" fill="#6f3fa8"/>
+            <path d="M5 15.5c2-4 3.5-6 5-6s1 5 3 5 2.5-5 4.5-7" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            <circle cx="18" cy="17.5" r="1.6" fill="#ffd166"/>
+          </svg>
+          sketchmoor
+        </a>
+
+        <div class="boards-me row">
+          <span class="boards-avatar" style={{ background: userColor }}>{userName[0]}</span>
+          <span class="boards-name">{userName}</span>
+          <button class="is-ghost is-sm" onclick={() => onSignout()}>Sign out</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="page-shell boards-main stack is-xl">
+      <div class="boards-top row">
+        <div>
+          <h1>Your boards</h1>
+          <p>Boards you made, and every board someone shared with you.</p>
+        </div>
+
+        <form class="boards-new row" onsubmit={() => onSubmit(form)}>
+          <input value={form.title} placeholder="Name a new board" aria-label="New board name">
+          <button type="submit" class="is-primary">New board</button>
+        </form>
+      </div>
+
+      <ul e:if={boards.length > 0} class="boards-grid">
+        <li e:for={board of boards}>
+          <a class="board-card" href={`/b/${board.id}`}>
+            <span class="board-thumb">
+              <img src={thumbnailUrl(board)} alt="" width="320" height="200" loading="lazy">
+            </span>
+            <div class="board-meta">
+              <h2>{board.title}</h2>
+              <p>{board.ownerName} · {board.memberCount} {board.memberCount === 1 ? "member" : "members"} · edited {timeAgo(new Date(board.updatedAt))}</p>
+            </div>
+          </a>
+        </li>
+      </ul>
+
+      <div e:else class="boards-empty stack is-sm">
+        <strong>No boards yet.</strong>
+        <span>Name one above, or open a link someone shared with you.</span>
+      </div>
+    </main>
+  </body>
+</html>

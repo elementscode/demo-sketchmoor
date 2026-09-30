@@ -1,0 +1,46 @@
+import "./style.css";
+
+<AuthShell>
+  <div class="auth-shell">
+    <aside class="auth-art" aria-hidden="true">
+      <div class="auth-brand row">
+        <svg width="28" height="28" viewBox="0 0 24 24">
+          <rect width="24" height="24" rx="5" fill="#8e5bd0"/>
+          <path d="M5 15.5c2-4 3.5-6 5-6s1 5 3 5 2.5-5 4.5-7" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+          <circle cx="18" cy="17.5" r="1.6" fill="#ffd166"/>
+        </svg>
+        sketchmoor
+      </div>
+
+      <svg class="auth-sketch" width="600" height="400" viewBox="0 0 600 400" preserveAspectRatio="xMidYMid meet">
+        <rect x="70" y="220" width="150" height="90" rx="10" fill="none" stroke="#b69be0" stroke-width="3"/>
+        <rect x="380" y="240" width="150" height="90" rx="10" fill="none" stroke="#7fd1a8" stroke-width="3"/>
+        <path d="M225 265 C 280 240, 320 300, 372 282" fill="none" stroke="#f6f1ff" stroke-width="3" stroke-linecap="round"/>
+        <path d="M358 272 L373 282 L357 292" fill="none" stroke="#f6f1ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M110 120 c 20 -30, 40 -30, 60 0 s 40 30, 60 0 s 40 -30, 60 0" fill="none" stroke="#ffd166" stroke-width="4" stroke-linecap="round"/>
+      </svg>
+
+      <div class="auth-note is-a">Ship the share link before the demo</div>
+      <div class="auth-note is-b">Cursors with names!</div>
+
+      <div class="auth-cursor is-a">
+        <svg width="16" height="18" viewBox="0 0 16 18"><path d="M1 1 L1 15 L5 11 L8 17 L10.5 16 L7.5 10 L13 10 Z" fill="#0090ff" stroke="#fff" stroke-width="1.2"/></svg>
+        <span style="background: #0090ff">Grace</span>
+      </div>
+
+      <div class="auth-cursor is-b">
+        <svg width="16" height="18" viewBox="0 0 16 18"><path d="M1 1 L1 15 L5 11 L8 17 L10.5 16 L7.5 10 L13 10 Z" fill="#30a46c" stroke="#fff" stroke-width="1.2"/></svg>
+        <span style="background: #30a46c">Alan</span>
+      </div>
+
+      <div class="auth-tagline">
+        <h2>Think out loud, together.</h2>
+        <p>A shared whiteboard for sticky-note retros, system sketches and everything between.</p>
+      </div>
+    </aside>
+
+    <div class="auth-panel">
+      <slot/>
+    </div>
+  </div>
+</AuthShell>
