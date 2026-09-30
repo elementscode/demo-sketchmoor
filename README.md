@@ -4,7 +4,7 @@
 
 > A demo app built with [Elements](https://elements.dev).
 
-Pen, sticky notes, shapes, arrows and text on boards shared by link, with named live cursors, real-time edits, per-person undo and a board list with thumbnails.
+Sticky notes, pen, shapes and arrows on shared boards, with named live cursors, real-time edits and per-person undo.
 
 **Demo:** [Sketchmoor](TBD)
 
