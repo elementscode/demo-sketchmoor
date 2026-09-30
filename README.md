@@ -1,4 +1,4 @@
-![Sketchmoor, a shared whiteboard built with Elements: a sprint retro board of sticky notes in three columns, with Grace's live cursor underlining a note mid-stroke and Alan's named cursor beside the circled action items.](POSTER_URL)
+![Sketchmoor, a shared whiteboard built with Elements: a sprint retro board of sticky notes in three columns, with Grace's live cursor underlining a note mid-stroke and Alan's named cursor beside the circled action items.](https://elements.dev/demos/01a0f3cc-bac6-7c63-807c-cad09fc8582f/poster?v=f6d2223845f3)
 
 # Sketchmoor
 
@@ -6,7 +6,7 @@
 
 Sticky notes, pen, shapes and arrows on shared boards, with named live cursors, real-time edits and per-person undo.
 
-**Demo:** [Sketchmoor](TBD)
+**Demo:** [Sketchmoor](https://elements.dev/demos/01a0f3cc-bac6-7c63-807c-cad09fc8582f)
 
 ## Agent specs
 
