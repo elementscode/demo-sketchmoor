@@ -29,12 +29,12 @@ Sketchmoor needed boards that several people draw on at once, named cursors that
 
 ### What Elements gave the app
 
-- **Shapes that sync.** `shapes` is a LiveTable in `app/shared/services/boards.ts`, one view per board. Notes, pen strokes, rectangles, arrows and text are rows, and the board page adds and moves them straight through the view, so every open copy of the board updates as each edit lands. The table's own handlers check that the editor is on the board.
-- **Cursors and strokes in flight.** A `boardEvents` channel carries what is seen but never stored: each person's named cursor, the stroke under their pen and a shape mid-drag. The page sends them through the `emit` rpc, and each browser drops its own echo.
-- **Undo for each person.** Erasing marks a shape as deleted, so an erased shape can come back. The board page keeps each person's own undo and redo steps in `app/pages/board/template.ehtml`, up to 200 deep, and applies them through the same view.
-- **Shared by link.** Opening `/b/:id` calls `join`, which adds the signed-in user to the board's members, and every write checks that membership.
-- **Thumbnails from the data.** `/b/:id/thumbnail.svg` draws each board's shapes as an SVG with `renderThumbnail` for the board list, cached until the next edit.
-- **Data from SQL files.** Two migrations define the boards and seed three demo accounts sharing two boards, a sprint retro of sticky notes and an architecture sketch.
+- **Shapes that sync.** Shapes are a LiveTable, one view per board. Notes, pen strokes, rectangles, arrows and text are rows, and the board adds and moves them straight through the view, so every open copy updates as each edit lands.
+- **Cursors and strokes in flight.** A channel carries what is seen but never stored: each person's named cursor, the stroke under their pen and a shape mid-drag. Each browser drops its own echo.
+- **Undo for each person.** Erasing marks a shape as deleted, so it can come back. Each person keeps their own undo and redo steps, applied through the same view.
+- **Shared by link.** Opening a board's link adds the signed-in user to its members, and every edit checks that membership.
+- **Thumbnails from the data.** The board list shows each board drawn as an SVG from its shapes, cached until the next edit.
+- **Data and sessions from SQL.** Migrations define the boards and seed three demo accounts sharing two boards, a sprint retro of sticky notes and an architecture sketch. Each person signs in with a session.
 
 ### What the project server gave the agent
 
@@ -43,8 +43,6 @@ The project server runs alongside the agent and answers as soon as a file is sav
 ### What shipped
 
 The app type-checks with zero errors and all 22 tests pass. Every page works on desktop and phone.
-
-Start in `app/pages/board/template.ehtml`.
 
 ## Demo accounts
 
