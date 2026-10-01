@@ -38,7 +38,7 @@ Sketchmoor needed boards that several people draw on at once, named cursors that
 
 ### What the agent got from the tooling
 
-The agent ran 18 builds in 22 minutes. By the build's own timer, the median build finished in 43 milliseconds, so it checked its work after each edit and kept going. The build caught eleven errors in the tests where a helper's callback had become async, with a message that showed the corrected signature. The agent read 39 manual pages as it reached each part, from `recipes/collaborative-canvas` and `recipes/presence` to `livetable/mutations`, then wrote 22 tests and checked its pages at phone width in a real browser.
+The agent ran 18 builds in 22 minutes, checking its work after each edit and moving straight on. The build caught eleven errors in the tests where a helper's callback had become async, with a message that showed the corrected signature. The agent read 39 manual pages as it reached each part, from `recipes/collaborative-canvas` and `recipes/presence` to `livetable/mutations`, then wrote 22 tests and checked its pages at phone width in a real browser.
 
 Start in `app/pages/board/template.ehtml`.
 
