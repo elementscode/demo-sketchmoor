@@ -30,10 +30,15 @@ Sketchmoor needed boards that several people draw on at once, named cursors that
 ### What Elements gave the app
 
 - **Shapes that sync.** Shapes are a LiveTable, one view per board. Notes, pen strokes, rectangles, arrows and text are rows, and the board adds and moves them straight through the view, so every open copy updates as each edit lands.
+
 - **Cursors and strokes in flight.** A channel carries what is seen but never stored: each person's named cursor, the stroke under their pen and a shape mid-drag. Each browser drops its own echo.
+
 - **Undo for each person.** Erasing marks a shape as deleted, so it can come back. Each person keeps their own undo and redo steps, applied through the same view.
+
 - **Shared by link.** Opening a board's link adds the signed-in user to its members, and every edit checks that membership.
+
 - **Thumbnails from the data.** The board list shows each board drawn as an SVG from its shapes, cached until the next edit.
+
 - **Data and sessions from SQL.** Migrations define the boards and seed three demo accounts sharing two boards, a sprint retro of sticky notes and an architecture sketch. Each person signs in with a session.
 
 ### What the project server gave the agent
