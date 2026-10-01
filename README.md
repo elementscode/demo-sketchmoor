@@ -36,9 +36,13 @@ Sketchmoor needed boards that several people draw on at once, named cursors that
 - **Thumbnails from the data.** `/b/:id/thumbnail.svg` draws each board's shapes as an SVG with `renderThumbnail` for the board list, cached until the next edit.
 - **Data from SQL files.** Two migrations define the boards and seed three demo accounts sharing two boards, a sprint retro of sticky notes and an architecture sketch.
 
-### What the agent got from the tooling
+### What the project server gave the agent
 
-The agent ran 18 builds in 22 minutes, checking its work after each edit and moving straight on. The build caught eleven errors in the tests where a helper's callback had become async, with a message that showed the corrected signature. The agent read 39 manual pages as it reached each part, from `recipes/collaborative-canvas` and `recipes/presence` to `livetable/mutations`, then wrote 22 tests and checked its pages at phone width in a real browser.
+The project server runs alongside the agent and answers as soon as a file is saved: it type-checks the templates, TypeScript and SQL, applies migrations and reruns the tests, so every question came back right away and the agent kept building.
+
+### What shipped
+
+The app type-checks with zero errors and all 22 tests pass. Every page was checked on desktop and phone before publishing. The repo was installed fresh from GitHub and run before the demo went live.
 
 Start in `app/pages/board/template.ehtml`.
 
