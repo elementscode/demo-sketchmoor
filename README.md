@@ -10,9 +10,6 @@ Sticky notes, pen, shapes and arrows on shared boards, with named live cursors, 
 
 ## Agent specs
 
-What one run of the prompt below took, from an empty Elements project to this
-app.
-
 - **Agent:** Claude Code, Opus 5.5 Medium
 - **Time:** 22 min
 - **Cost:** $6.93 at API rates, September 2026
@@ -63,26 +60,7 @@ people to see each other's cursors and edits live.
 | Grace Hopper | grace@sketchmoor.dev |
 | Alan Turing  | alan@sketchmoor.dev  |
 
-## The prompt
-
-```text
-Build a collaborative whiteboard named sketchmoor.
-
-- Sign up, log in, create boards, and share a board by link with anyone who
-  has an account.
-- Tools: pen with a few colors and widths, sticky notes with text, rectangles,
-  arrows, text, and an eraser.
-- Move and resize shapes and notes.
-- Everyone on a board sees each other's cursors with their names, and every
-  change as it happens.
-- Undo and redo your own changes.
-- A board list with thumbnails.
-
-Seed three users and two boards with content (a retro board of sticky notes,
-and an architecture sketch). Show the seeded logins on the sign-in page.
-
-Drawing, shapes and cursors update in real time.
-```
+**Demo:** [Sketchmoor](https://elements.dev/demos/01a0f3cc-bac6-7c63-807c-cad09fc8582f)
 
 ## License
 
