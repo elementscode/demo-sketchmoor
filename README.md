@@ -1,30 +1,16 @@
-![Sketchmoor, a shared whiteboard built with Elements: a sprint retro board of sticky notes in three columns, with Grace's live cursor underlining a note mid-stroke and Alan's named cursor beside the circled action items.](https://elements.dev/demos/01a0f3cc-bac6-7c63-807c-cad09fc8582f/poster?v=f6d2223845f3)
+![A shared whiteboard with live cursors, built by Claude Code on Elements: a sprint retro board of sticky notes in three columns, with Grace's live cursor underlining a note mid-stroke and Alan's named cursor beside the circled action items.](https://elements.dev/demos/01a0f3cc-bac6-7c63-807c-cad09fc8582f/poster?v=f6d2223845f3)
 
-# Sketchmoor
+# A shared whiteboard with live cursors, built by Claude Code on Elements
 
-> A demo app built with [Elements](https://elements.dev).
+> Sketchmoor is a full-stack app built with Claude Code on Elements.
 
 Sticky notes, pen, shapes and arrows on shared boards, with named live cursors, real-time edits and per-person undo.
 
-**Demo:** [Sketchmoor](https://elements.dev/demos/01a0f3cc-bac6-7c63-807c-cad09fc8582f)
-
-## Agent specs
-
-- **Agent:** Claude Code, Opus 5.5 Medium
-- **Time:** 22 min
-- **Cost:** $6.93 at API rates, September 2026
-
-## Get started
-
-```bash
-elements create sketchmoor -scaffold=elementscode/demo-sketchmoor
-```
+[Run this app on your machine](https://elements.dev/demos/01a0f3cc-bac6-7c63-807c-cad09fc8582f). Use this demo as inspiration, or as the starting point for your own app. Your agent creates a new app with this one as the scaffold, and you prompt it to add whatever features you want.
 
 ## How it's built
 
 Sketchmoor needed boards that several people draw on at once, named cursors that follow each person's pointer, strokes that appear as they are drawn, undo for each person and accounts with shared links. Each of those is a part of Elements, so the agent spent its 22 minutes on the whiteboard itself.
-
-### What Elements gave the app
 
 - **Shapes that sync.** Shapes are a LiveTable, one view per board. Notes, pen strokes, rectangles, arrows and text are rows, and the board adds and moves them straight through the view, so every open copy updates as each edit lands.
 
@@ -38,30 +24,6 @@ Sketchmoor needed boards that several people draw on at once, named cursors that
 
 - **Data and sessions from SQL.** Migrations define the boards and seed three demo accounts sharing two boards, a sprint retro of sticky notes and an architecture sketch. Each person signs in with a session.
 
-### What the project server gave the agent
+## Why Elements
 
-The project server runs alongside the agent and answers as soon as a file is saved: it type-checks the templates, TypeScript and SQL, applies migrations and reruns the tests, so every question came back right away and the agent kept building.
-
-### What shipped
-
-The app type-checks with zero errors and all 22 tests pass. Every page works on desktop and phone.
-
-## Demo accounts
-
-The seed creates two boards that all three accounts share: "Sprint 14 retro",
-sticky notes in three columns, and "Checkout architecture", a sketch of
-services, arrows and notes. Every account's password is `sketchmoor`, and the
-sign-in page lists them. Open a board in two browsers signed in as different
-people to see each other's cursors and edits live.
-
-| Name         | Email                |
-| ------------ | -------------------- |
-| Ada Lovelace | ada@sketchmoor.dev   |
-| Grace Hopper | grace@sketchmoor.dev |
-| Alan Turing  | alan@sketchmoor.dev  |
-
-**Demo:** [Sketchmoor](https://elements.dev/demos/01a0f3cc-bac6-7c63-807c-cad09fc8582f)
-
-## License
-
-MIT. See [LICENSE](LICENSE).
+Elements is an integrated full-stack app framework and a project server. The project server checks the agent's work as it builds: it type-checks the server and browser code, analyzes the program, applies migrations and runs the tests, then reports the results to the agent. A security mistake, such as calling a server-only function from the browser, is a compile error. The agent reads the report and fixes its own mistakes before it tells you a feature is done. The same checks run on every feature you ask for next.
